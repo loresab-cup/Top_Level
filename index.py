@@ -54,7 +54,7 @@ def extract_code_with_metadata(file_path: str) -> list:
 def prepare_text_for_embedding(code_data):
     """Обогащение текста перед векторизацией"""
     parts = []
-    parts.append(f'{code_data["type"]}: {code_data[name]}')
+    parts.append(f'{code_data["type"]}: {code_data["name"]}')
     if code_data['docstring']:
         parts.append(f'Description: {code_data["docstring"]}')
     parts.append(f'Code:{code_data['code']}')
