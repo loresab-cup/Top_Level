@@ -18,6 +18,7 @@ if 'results' not in st.session_state:
 if 'answer' not in st.session_state:
     st.session_state.answer = None
 
+
 @st.cache_resource
 def load_db():
     try:
@@ -25,16 +26,21 @@ def load_db():
             return []
         client = chromadb.PersistentClient(path="./chroma_db")
         collection = client.get_collection("code_snippets")
-        data = collection.get(include=["embeddings", "metadatas"])
+
+        # ОБЯЗАТЕЛЬНО запрашиваем и документы (documents) тоже!
+        data = collection.get(include=["embeddings", "metadatas", "documents"])
+
         if not data['ids']:
             return []
         records = []
         for i in range(len(data['ids'])):
             record = data['metadatas'][i].copy()
             record['embedding'] = data['embeddings'][i]
+            record['code'] = data['documents'][i]  # СРОЧНО ДОБАВЛЯЕМ САМ КОД КУСКА!
             records.append(record)
         return records
-    except:
+    except Exception as e:
+        st.error(f"Ошибка загрузки БД: {e}")
         return []
 
 with st.sidebar:

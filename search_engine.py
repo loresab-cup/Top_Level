@@ -83,8 +83,10 @@ def search_top_code_snippets(user_query: str, database_records: list) -> list:
         relevance_percentage = round(final_score * 100, 2)
 
         # Собираем все метаданные по ТЗ
+        clean_file_path = record.get("file_path", "Не указан").replace("\\", "/")
+
         result_payload = {
-            "file_path": record.get("file_path", "Не указан"),
+            "file_path": clean_file_path,
             "type": record.get("type", "unknown"),
             "name": record.get("name", "без имени"),
             "lines": record.get("lines", "0-0"),
