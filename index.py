@@ -54,7 +54,7 @@ def extract_code_with_metadata(file_path: str) -> list:
 def prepare_text_for_embedding(code_data):
     """Обогащение текста перед векторизацией"""
     parts = []
-    parts.append(f'{code_data["type"]}: {code_data[name]}')
+    parts.append(f'{code_data["type"]}: {code_data["name"]}')
     if code_data['docstring']:
         parts.append(f'Description: {code_data["docstring"]}')
     parts.append(f'Code:{code_data['code']}')
@@ -113,8 +113,8 @@ def index_codebase(directory: str):
                 }
 
                 #айди через хеш
-                unique_key = f"{chunk['file_path']}:{chunk['name']}:{chunk['lines']}"
-                chunk_id = hashlib.md5(unique_key.encode("utf-8")).hexdigest()
+                start_line = chunk['lines'].split('-')[0]
+                chunk_id = f"{chunk['file_path']}:{chunk['name']}:{start_line}"
 
 
                 documents.append(enriched_text)
