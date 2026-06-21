@@ -9,5 +9,10 @@ python -m venv .venv
 .venv\Scripts\activate.bat
 pip install -r requirements.txt
 
+если вы уже устанавливали зависимости раньше выполните команду для перехода в вирутальное окружение
+linux: 
+source .venv/bin/activate
+windows(cmd)
+.venv\Scripts\activate.bat
 затем запустите приложение командой
 streamlit run app.py
