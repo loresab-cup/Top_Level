@@ -18,6 +18,7 @@ def main():
     collection = client.get_collection("code_snippets")
     data = collection.get(include=["embeddings", "metadatas", "documents"])
 
+    # Собираем записи базы данных в список словарей
     database_records = []
     for i in range(len(data['ids'])):
         record = data['metadatas'][i].copy()
@@ -27,31 +28,27 @@ def main():
 
     output_results = []
 
+    # 3. Прогоняем каждый вопрос через твой поиск
     print("Генерация результатов для eval_questions.json...")
     for item in eval_data:
         q_id = item["question_id"]
         query_text = item.get("query") or item.get("text") or item.get("question")
 
+        # Вызываем твой гибридный поиск (он вернет ТОП-5)
         top_snippets = search_top_code_snippets(query_text, database_records)
 
+        # Собираем ID найденных кусков кода
         predicted_ids = []
         for snippet in top_snippets:
-            # Жесткая нормализация пути для Windows и любых форматов индексации
+            # Исправляем дублирование пути: приводим к прямым слэшам и убираем лишнюю папку
             file_path = snippet['file_path'].replace("\\", "/")
-
-            # Убираем точки и лишние слэши в начале, если они есть
-            if file_path.startswith("./"):
-                file_path = file_path[2:]
-
-            # Если папка gymhero продублировалась — срезаем дубль
             if file_path.startswith("gymhero/gymhero/"):
                 file_path = file_path.replace("gymhero/gymhero/", "gymhero/", 1)
 
-            # Если вдруг путь начинается не с gymhero (например, забыли при индексации)
-            if not file_path.startswith("gymhero/"):
-                file_path = "gymhero/" + file_path
-
+            # Берем первую строчку фрагмента кода
             start_line = snippet['lines'].split('-')[0]
+
+            # Собираем итоговую строку по формату ТЗ и добавляем в список
             snippet_id = f"{file_path}:{snippet['name']}:{start_line}"
             predicted_ids.append(snippet_id)
 
@@ -60,9 +57,11 @@ def main():
             "top_5_chunks": predicted_ids
         })
 
+    # 4. Сохраняем итоговый файл результатов для жюри
     with open("results.json", "w", encoding="utf-8") as f:
         json.dump(output_results, f, ensure_ascii=False, indent=4)
-    print("Успешно сохранено в results.json")
+
+    print("Успешно! Файл results.json создан. Теперь можно запускать python score.py")
 
 
 if __name__ == "__main__":
