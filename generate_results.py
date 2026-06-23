@@ -40,21 +40,28 @@ def main():
         # Собираем ID найденных кусков кода
         predicted_ids = []
         for snippet in top_snippets:
-            # Формируем ID прямо на лету для надежности
+            # Исправляем дублирование пути: приводим к прямым слэшам и убираем лишнюю папку
+            file_path = snippet['file_path'].replace("\\", "/")
+            if file_path.startswith("gymhero/gymhero/"):
+                file_path = file_path.replace("gymhero/gymhero/", "gymhero/", 1)
+
+            # Берем первую строчку фрагмента кода
             start_line = snippet['lines'].split('-')[0]
-            snippet_id = f"{snippet['file_path']}:{snippet['name']}:{start_line}"
+
+            # Собираем итоговую строку по формату ТЗ и добавляем в список
+            snippet_id = f"{file_path}:{snippet['name']}:{start_line}"
             predicted_ids.append(snippet_id)
 
         output_results.append({
             "question_id": q_id,
-            "predicted": predicted_ids
+            "top_5_chunks": predicted_ids
         })
 
     # 4. Сохраняем итоговый файл результатов для жюри
     with open("results.json", "w", encoding="utf-8") as f:
         json.dump(output_results, f, ensure_ascii=False, indent=4)
 
-    print(" Успешно! Файл results.json создан. Проверьте точность с помощью score.py")
+    print("Успешно! Файл results.json создан. Теперь можно запускать python score.py")
 
 
 if __name__ == "__main__":
