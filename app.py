@@ -4,14 +4,15 @@ import chromadb
 import socket
 import subprocess
 import time
+import json
+import sys
+from pathlib import Path
 from search_engine import search_top_code_snippets
 from llm_assistant import generate_llm_answer
 
 # Настройка переменных окружения для подавления технических предупреждений
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-directory = "parsing_folder"
 
 # --- Автозапуск локального сервиса Ollama ---
 def ensure_ollama_is_running():
@@ -34,7 +35,6 @@ def ensure_ollama_is_running():
         except FileNotFoundError:
             st.error("Критическая ошибка: Команда 'ollama' не найдена в системе. Проверьте переменную PATH.")
 
-
 ensure_ollama_is_running()
 
 # Конфигурация интерфейса
@@ -42,82 +42,147 @@ st.set_page_config(page_title="CodeLens - Поиск по коду", layout="wid
 st.title("CodeLens")
 st.caption("Система семантического поиска и интеллектуального анализа исходного кода")
 
-
 # --- Низкоуровневое чтение данных из ChromaDB ---
 def fetch_records_from_storage():
-    with st.spinner("Выполняется чтение и загрузка базы данных..."):
+    """Загружает записи из ChromaDB, если коллекция существует."""
+    try:
+        client = chromadb.PersistentClient(path="./chroma_db")
+        # Проверяем, есть ли коллекция
         try:
-            client = chromadb.PersistentClient(path="./chroma_db")
             collection = client.get_collection("code_snippets")
-            data = collection.get(include=["embeddings", "metadatas", "documents"])
+        except Exception:
+            # Коллекция не существует – база ещё не создана
+            return None  # вернём None, чтобы сигнализировать об отсутствии базы
 
-            if not data or not data['ids']:
-                return []
+        data = collection.get(include=["embeddings", "metadatas", "documents"])
+        if not data or not data['ids']:
+            return None
 
-            records = []
-            for i in range(len(data['ids'])):
-                record = data['metadatas'][i].copy()
-                record['embedding'] = data['embeddings'][i]
-                record['code'] = data['documents'][i]
-                records.append(record)
-            return records
+        records = []
+        for i in range(len(data['ids'])):
+            record = data['metadatas'][i].copy()
+            record['embedding'] = data['embeddings'][i]
+            record['code'] = data['documents'][i]
+            records.append(record)
+        return records
+    except Exception as e:
+        st.error(f"Ошибка при чтении базы данных: {e}")
+        return None
+
+# --- Функция переиндексации с заданной директорией ---
+def reindex_codebase(directory: str):
+    with st.spinner(f"Индексация директории {directory}..."):
+        try:
+            process = subprocess.run(
+                ["python", "index.py", directory],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            if process.returncode != 0:
+                st.error(f"Ошибка индексации: {process.stderr}")
+                return False
+            st.success("Индексация завершена успешно.")
+            return True
         except Exception as e:
-            st.error(f"Ошибка при чтении базы данных: {e}")
-            return []
+            st.error(f"Не удалось запустить скрипт индексации: {e}")
+            return False
 
+# --- Функция оценки Precision@5 ---
+def evaluate_precision():
+    """Запускает generate_results.py и score.py, возвращает строку с результатами."""
+    # Проверяем наличие eval_questions.json
+    if not os.path.exists("eval_questions.json"):
+        return "Ошибка: файл eval_questions.json не найден в корне проекта."
 
-# --- Автоматический менеджер состояния базы данных ---
-@st.cache_resource
-def manage_database_state():
-    db_path = "./chroma_db"
+    # Сначала генерируем результаты
+    with st.spinner("Генерация результатов для тестовых вопросов..."):
+        gen_proc = subprocess.run(
+            [sys.executable, "generate_results.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if gen_proc.returncode != 0:
+            return f"Ошибка при генерации результатов: {gen_proc.stderr}"
 
-    # Если базы данных нет на диске — запускаем автоматический парсинг датасета
-    if not os.path.exists(db_path):
-        with st.spinner("Локальная база данных не обнаружена. Выполняется парсинг и индексация исходного кода..."):
-            try:
-                process = subprocess.run(
-                    ["python", "index.py", directory],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
+    # Затем запускаем score.py
+    with st.spinner("Вычисление Precision@5..."):
+        score_proc = subprocess.run(
+            [sys.executable, "score.py", "--predictions", "results.json", "--questions", "eval_questions.json"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if score_proc.returncode != 0:
+            return f"Ошибка при вычислении метрики: {score_proc.stderr}"
 
-                if process.returncode != 0:
-                    error_message = process.stderr.decode("utf-8", errors="replace")
-                    if "UnicodeEncodeError" in error_message or "charmap" in error_message:
-                        if os.path.exists(db_path):
-                            return fetch_records_from_storage()
+    # Возвращаем полный вывод score.py (он уже содержит таблицы и итоговую оценку)
+    return score_proc.stdout
 
-                    st.error(f"Ошибка при работе модуля индексации: {error_message}")
-                    return []
-            except Exception as e:
-                st.error(f"Не удалось автоматический запустить скрипт индексации: {e}")
-                return []
-        st.success("Парсинг успешно завершен. База данных создана и загружена.")
-
-    return fetch_records_from_storage()
-
-
-# Инициализация состояний сессии при старте
-if 'db' not in st.session_state or st.session_state.db is None:
-    st.session_state.db = manage_database_state()
-
+# --- Инициализация состояния сессии ---
+if 'db' not in st.session_state:
+    st.session_state.db = fetch_records_from_storage()
 if 'results' not in st.session_state:
     st.session_state.results = None
 if 'answer' not in st.session_state:
     st.session_state.answer = None
+if 'directory' not in st.session_state:
+    st.session_state.directory = "parsing_folder"   # значение по умолчанию
+if 'precision_report' not in st.session_state:
+    st.session_state.precision_report = None
 
-# --- Боковая панель управления (Sidebar) ---
+# --- Боковая панель управления ---
 with st.sidebar:
-    st.markdown("### Статус системы")
+    st.markdown("### Управление системой")
+
+    # Поле ввода пути к директории с кодом
+    new_dir = st.text_input(
+        "Путь к директории с Python-кодом",
+        value=st.session_state.directory,
+        help="Укажите относительный или абсолютный путь к папке, содержащей .py файлы."
+    )
+    if new_dir != st.session_state.directory:
+        st.session_state.directory = new_dir
+
+    # Кнопка переиндексации
+    if st.button("Переиндексировать код", use_container_width=True):
+        if os.path.isdir(st.session_state.directory):
+            if reindex_codebase(st.session_state.directory):
+                st.session_state.db = fetch_records_from_storage()
+                st.session_state.results = None
+                st.session_state.answer = None
+                st.session_state.precision_report = None
+                st.rerun()
+        else:
+            st.error(f"Директория '{st.session_state.directory}' не существует.")
+
+    st.divider()
+
+    # Кнопка оценки точности
+    if st.button("Оценить Precision@5", use_container_width=True):
+        report = evaluate_precision()
+        st.session_state.precision_report = report
+        st.rerun()
+
+    st.divider()
+
+    # Индикатор статуса базы данных
     if st.session_state.db:
-        st.info(f"Подключение: Активно\n\nПроиндексировано фрагментов: {len(st.session_state.db)}")
+        st.info(f"Статус: Подключено\n\nПроиндексировано фрагментов: {len(st.session_state.db)}")
     else:
-        st.warning("Подключение: База данных пуста или не загружена.")
+        st.warning("Статус: База данных не загружена или пуста.")
 
     st.divider()
     use_llm = st.checkbox("Включить генерацию ответа ИИ", value=True)
 
-# --- Основной поисковый интерфейс ---
+# --- Основной интерфейс: отображение отчёта по метрике (если есть) ---
+if st.session_state.precision_report:
+    st.divider()
+    st.markdown("### Отчёт о точности (Precision@5)")
+    st.text(st.session_state.precision_report)
+
+# --- Поисковый интерфейс ---
 user_query = st.text_input(
     "Введите технический вопрос или ключевые слова:",
     placeholder="Например: как в проекте создаётся токен доступа?"
@@ -139,26 +204,21 @@ if st.button("Выполнить поиск", type="primary") and user_query:
 
 # --- Отображение результатов поиска и генерация ИИ ---
 if st.session_state.results:
-
-    # СНАЧАЛА: Выводим найденные фрагменты кода на экран
     st.divider()
     st.markdown("### Результаты поиска (Top-5)")
 
     for i, result in enumerate(st.session_state.results):
         header_text = f"[{i + 1}] {result['name']} | Путь: {result['file_path']} (Релевантность: {result['score']}%). "
-
         with st.expander(header_text):
             st.code(result['code'], language="python")
             if result.get('docstring'):
                 st.markdown(f"**Документация:** {result['docstring']}")
 
-    # ЗАТЕМ: После отрисовки кода запускаем генерацию ответа ИИ
     if use_llm and st.session_state.answer is None:
         with st.spinner("Генерация аналитического ответа ИИ..."):
             st.session_state.answer = generate_llm_answer(user_query, st.session_state.results)
             st.rerun()
 
-    # Отображение готового ответа ИИ строго под фрагментами кода
     if st.session_state.answer:
         st.divider()
         st.markdown("### Аналитический ответ ассистента")
