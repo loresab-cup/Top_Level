@@ -1,134 +1,146 @@
 import streamlit as st
 import os
 import chromadb
-from search_engine import search_top_code_snippets
-from llm_assistant import generate_llm_answer
 import socket
 import subprocess
 import time
+from search_engine import search_top_code_snippets
+from llm_assistant import generate_llm_answer
+
+# Настройка окружения
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-# Автозапуск Ollama
+# --- Сервис Ollama (Автозапуск) ---
 def ensure_ollama_is_running():
-    """
-    Проверяет, открыт ли порт Ollama (11434).
-    Если порт закрыт, автоматически запускает процесс Ollama в фоновом режиме.
-    """
     ollama_port = 11434
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(1)
-
     try:
-        # Пробуем подключиться к локальному порту Ollama
         s.connect(("127.0.0.1", ollama_port))
         s.close()
     except (socket.error, socket.timeout):
-        # Если подключиться не удалось, значит сервис выключен
-        st.info("Локальный сервис Ollama не активен. Запускаю автоматически в фоновом режиме...")
+        st.info("Информационное сообщение: Локальный сервис Ollama не активен. Выполняется фоновый запуск...")
         try:
-            # Запускаем фоновый процесс 'ollama serve'
             subprocess.Popen(
                 ["ollama", "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            # Даем модели 3-4 секунды, чтобы инициализировать сокет и считать конфиги
             time.sleep(3.5)
-            st.success("Ollama успешно запущена!")
+            st.success("Сервис Ollama успешно запущен.")
         except FileNotFoundError:
-            st.error(
-                "Ошибка: Команда 'ollama' не найдена в системе. Убедитесь, что Ollama установлена и добавлена в PATH.")
+            st.error("Критическая ошибка: Команда 'ollama' не найдена в системе. Проверьте переменную PATH.")
 
 
-# Запускаем проверку при каждом старте или обновлении страницы Streamlit
 ensure_ollama_is_running()
 
-
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
+# Конфигурация страницы
 st.set_page_config(page_title="CodeLens - Поиск по коду", layout="wide")
+st.title("CodeLens")
+st.caption("Система семантического поиска и анализа исходного кода")
 
-st.title("CodeLens - Поиск по коду")
 
-if 'db' not in st.session_state:
-    st.session_state.db = None
+# --- Автоматическая загрузка базы данных ---
+@st.cache_resource
+def load_db_records():
+    if not os.path.exists("./chroma_db"):
+        return []
+    try:
+        client = chromadb.PersistentClient(path="./chroma_db")
+        collection = client.get_collection("code_snippets")
+        data = collection.get(include=["embeddings", "metadatas", "documents"])
+
+        if not data or not data['ids']:
+            return []
+
+        records = []
+        for i in range(len(data['ids'])):
+            record = data['metadatas'][i].copy()
+            record['embedding'] = data['embeddings'][i]
+            record['code'] = data['documents'][i]
+            records.append(record)
+        return records
+    except Exception as e:
+        st.error(f"Ошибка при чтении базы данных: {e}")
+        return []
+
+
+# Проверка состояния сессии и загрузка данных на старте
+if 'db' not in st.session_state or st.session_state.db is None:
+    with st.spinner("Выполняется автоматическое подключение к базе данных..."):
+        st.session_state.db = load_db_records()
+
 if 'results' not in st.session_state:
     st.session_state.results = None
 if 'answer' not in st.session_state:
     st.session_state.answer = None
 
-
-@st.cache_resource
-def load_db():
-    try:
-        if not os.path.exists("./chroma_db"):
-            return []
-        client = chromadb.PersistentClient(path="./chroma_db")
-        collection = client.get_collection("code_snippets")
-
-        # ОБЯЗАТЕЛЬНО запрашиваем и документы (documents) тоже!
-        data = collection.get(include=["embeddings", "metadatas", "documents"])
-
-        if not data['ids']:
-            return []
-        records = []
-        for i in range(len(data['ids'])):
-            record = data['metadatas'][i].copy()
-            record['embedding'] = data['embeddings'][i]
-            record['code'] = data['documents'][i]  # СРОЧНО ДОБАВЛЯЕМ САМ КОД КУСКА!
-            records.append(record)
-        return records
-    except Exception as e:
-        st.error(f"Ошибка загрузки БД: {e}")
-        return []
-
+# --- Боковая панель управления (Sidebar) ---
 with st.sidebar:
-    if st.button("Загрузить базу"):
-        st.session_state.db = load_db()
-        if st.session_state.db:
-            st.success(f"Загружено {len(st.session_state.db)} фрагментов")
-    
-    if st.session_state.db is not None:
-        st.metric("Фрагментов", len(st.session_state.db))
-    
-    use_llm = st.checkbox("Использовать ИИ", value=True)
+    st.markdown("### Управление системой")
 
-user_query = st.text_input("Вопрос о коде:", placeholder="Например: как сделать авторизацию?")
+    # Кнопка обновления данных
+    if st.button("Обновить базу данных", use_container_width=True):
+        st.cache_resource.clear()
+        with st.spinner("Перезагрузка данных..."):
+            st.session_state.db = load_db_records()
+        st.success("Данные успешно обновлены.")
 
-if st.button("Найти") and user_query:
+    st.divider()
+
+    # Индикатор статуса подключения
+    if st.session_state.db:
+        st.info(f"Статус: Подключено\n\nПроиндексировано фрагментов: {len(st.session_state.db)}")
+    else:
+        st.warning("Статус: База данных не найдена. Запустите скрипт index.py")
+
+    st.divider()
+    use_llm = st.checkbox("Включить генерацию ответа ИИ", value=True)
+
+# --- Интерфейс поисковых запросов ---
+user_query = st.text_input(
+    "Введите технический вопрос или ключевые слова:",
+    placeholder="Например: как в проекте создаётся токен доступа?"
+)
+
+if st.button("Выполнить поиск", type="primary") and user_query:
     if not st.session_state.db:
-        st.warning("Загрузите базу данных")
+        st.error("Поиск отклонен: база данных не загружена.")
         st.stop()
-    
-    with st.spinner("Поиск..."):
+
+    with st.spinner("Выполняется анализ кодовой базы..."):
         st.session_state.results = search_top_code_snippets(user_query, st.session_state.db)
-        
+
         if st.session_state.results:
             if use_llm:
-                with st.spinner("Генерация ответа..."):
+                with st.spinner("Генерация аналитического ответа..."):
                     st.session_state.answer = generate_llm_answer(user_query, st.session_state.results)
             else:
                 st.session_state.answer = None
         else:
-            st.warning("Ничего не найдено")
+            st.warning("По вашему запросу совпадений не обнаружено. Измените формулировку.")
 
+# --- Отображение результатов анализа ---
 if st.session_state.results:
     results = st.session_state.results
-    
+
+    # Блок ответа локальной языковой модели
     if st.session_state.answer:
         st.divider()
-        st.subheader("Ответ ИИ")
+        st.markdown("### Аналитический ответ ассистента")
         st.markdown(st.session_state.answer)
-    
+
+    # Блок вывода найденных фрагментов кода
     st.divider()
-    st.subheader("Найденные фрагменты")
-    
+    st.markdown("### Результаты поиска (Top-5)")
+
     for i, result in enumerate(results):
-        with st.expander(f"{i+1}. {result['name']} ({result['score']}%)"):
-            st.markdown(f"**Файл:** `{result['file_path']}`")
-            st.markdown(f"**Тип:** {result['type']}")
-            st.markdown(f"**Строки:** {result['lines']}")
+        # Название функции, путь и процент релевантности в строгом текстовом формате
+        header_text = f"[{i + 1}] {result['name']} | Путь: {result['file_path']} (Релевантность: {result['score']}%). "
+
+        with st.expander(header_text):
+            st.code(result['code'], language="python")
             if result.get('docstring'):
                 st.markdown(f"**Документация:** {result['docstring']}")
-            st.code(result['code'], language="python")
