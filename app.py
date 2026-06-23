@@ -11,6 +11,7 @@ from llm_assistant import generate_llm_answer
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+directory = "parsing_folder"
 
 # --- Автозапуск локального сервиса Ollama ---
 def ensure_ollama_is_running():
@@ -75,7 +76,7 @@ def manage_database_state():
         with st.spinner("Локальная база данных не обнаружена. Выполняется парсинг и индексация исходного кода..."):
             try:
                 process = subprocess.run(
-                    ["python", "index.py", "gymhero"],
+                    ["python", "index.py", directory],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
