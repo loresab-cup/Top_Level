@@ -28,36 +28,39 @@ def main():
 
     output_results = []
 
-    # 3. Прогоняем каждый вопрос через твой поиск
+    # 3. Прогоняем каждый вопрос через поиск
     print("Генерация результатов для eval_questions.json...")
     for item in eval_data:
         q_id = item["question_id"]
         query_text = item.get("query") or item.get("text") or item.get("question")
 
-        # Вызываем твой гибридный поиск (он вернет ТОП-5)
+        # Вызываем гибридный поиск (он вернет ТОП-5)
         top_snippets = search_top_code_snippets(query_text, database_records)
 
         # Собираем ID найденных кусков кода
         predicted_ids = []
         for snippet in top_snippets:
-            # Исправляем дублирование пути: приводим к прямым слэшам и убираем лишнюю папку
+            # Приводим слеши и убираем префикс ./parsing_folder/, если он есть
             file_path = snippet['file_path'].replace("\\", "/")
-            if file_path.startswith("gymhero/gymhero/"):
-                file_path = file_path.replace("gymhero/gymhero/", "gymhero/", 1)
+            if file_path.startswith("./parsing_folder/"):
+                file_path = file_path[len("./parsing_folder/"):]
+            elif file_path.startswith("parsing_folder/"):
+                file_path = file_path[len("parsing_folder/"):]
 
             # Берем первую строчку фрагмента кода
             start_line = snippet['lines'].split('-')[0]
 
-            # Собираем итоговую строку по формату ТЗ и добавляем в список
+            # Собираем итоговую строку по формату ТЗ
             snippet_id = f"{file_path}:{snippet['name']}:{start_line}"
             predicted_ids.append(snippet_id)
 
+        # Добавляем результат для текущего вопроса
         output_results.append({
             "question_id": q_id,
             "top_5_chunks": predicted_ids
         })
 
-    # 4. Сохраняем итоговый файл результатов для жюри
+    # 4. Сохраняем итоговый файл результатов
     with open("results.json", "w", encoding="utf-8") as f:
         json.dump(output_results, f, ensure_ascii=False, indent=4)
 
