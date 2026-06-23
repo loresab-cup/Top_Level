@@ -57,7 +57,7 @@ def prepare_text_for_embedding(code_data):
     parts.append(f'{code_data["type"]}: {code_data["name"]}')
     if code_data['docstring']:
         parts.append(f'Description: {code_data["docstring"]}')
-    parts.append(f'Code:{code_data['code']}')
+    parts.append(f'Code:{code_data["code"]}')
 
     return '\n'.join(parts)
 
@@ -94,15 +94,12 @@ def index_codebase(directory: str):
             ids = []
 
             for chunk in code_chunks:
-                #Обогащенный текст
                 enriched_text = prepare_text_for_embedding(chunk)
 
-                #вектор
                 vector = get_text_embedding(enriched_text)
                 if not vector:
                     continue
 
-                #Метаданные
                 metadata = {
                     "file_path": chunk["file_path"],
                     "type": chunk["type"],
@@ -112,10 +109,8 @@ def index_codebase(directory: str):
                     "code": chunk["code"]
                 }
 
-                #айди через хеш
                 start_line = chunk['lines'].split('-')[0]
                 chunk_id = f"{chunk['file_path']}:{chunk['name']}:{start_line}"
-
 
                 documents.append(enriched_text)
                 embeddings.append(vector)
@@ -130,7 +125,7 @@ def index_codebase(directory: str):
                     ids=ids
                 )
                 total_chunks += len(documents)
-                print(f"  → Добавлено/обновлено {len(documents)} фрагментов")
+                print(f"  -> Добавлено/обновлено {len(documents)} фрагментов")
 
     print(f"\n Всего проиндексировано: {total_chunks} фрагментов кода")
     print(f"База данных: ./chroma_db")
