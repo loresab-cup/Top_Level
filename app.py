@@ -3,6 +3,46 @@ import os
 import chromadb
 from search_engine import search_top_code_snippets
 from llm_assistant import generate_llm_answer
+import socket
+import subprocess
+import time
+
+
+# Автозапуск Ollama
+def ensure_ollama_is_running():
+    """
+    Проверяет, открыт ли порт Ollama (11434).
+    Если порт закрыт, автоматически запускает процесс Ollama в фоновом режиме.
+    """
+    ollama_port = 11434
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(1)
+
+    try:
+        # Пробуем подключиться к локальному порту Ollama
+        s.connect(("127.0.0.1", ollama_port))
+        s.close()
+    except (socket.error, socket.timeout):
+        # Если подключиться не удалось, значит сервис выключен
+        st.info("Локальный сервис Ollama не активен. Запускаю автоматически в фоновом режиме...")
+        try:
+            # Запускаем фоновый процесс 'ollama serve'
+            subprocess.Popen(
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            # Даем модели 3-4 секунды, чтобы инициализировать сокет и считать конфиги
+            time.sleep(3.5)
+            st.success("Ollama успешно запущена!")
+        except FileNotFoundError:
+            st.error(
+                "Ошибка: Команда 'ollama' не найдена в системе. Убедитесь, что Ollama установлена и добавлена в PATH.")
+
+
+# Запускаем проверку при каждом старте или обновлении страницы Streamlit
+ensure_ollama_is_running()
+
 
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
