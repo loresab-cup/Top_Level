@@ -24,7 +24,6 @@ def calculate_cosine_similarity(vector_a: list, vector_b: list) -> float:
     norm_a = np.linalg.norm(a)
     norm_b = np.linalg.norm(b)
 
-    # Нулевой вектор — значит что-то пошло не так при индексации
     if norm_a == 0 or norm_b == 0:
         return 0.0
 
@@ -32,22 +31,18 @@ def calculate_cosine_similarity(vector_a: list, vector_b: list) -> float:
 
 
 def search_top_code_snippets(user_query: str, database_records: list) -> list:
-    """
-    Гибридный поиск: косинусное сходство + текстовые бонусы за ключевые слова.
-    Возвращает топ-5 результатов.
-    """
     query_vector = get_text_embedding(user_query)
     if not query_vector:
         return []
 
-    # Короткие слова (≤3 символа) как "как", "где", "что" не несут смысловой нагрузки
+    # Отсекаем короткие слова, они только мусорят
     query_words = [w for w in user_query.lower().split() if len(w) > 3]
     compiled_results = []
 
     for record in database_records:
         code_vector = record.get("embedding", None)
 
-        # ChromaDB может вернуть list, numpy array или None — обрабатываем все случаи
+        # На всякий случай проверяем, что вектор есть
         if code_vector is None:
             continue
         if isinstance(code_vector, (list, np.ndarray)) and len(code_vector) == 0:
@@ -59,17 +54,16 @@ def search_top_code_snippets(user_query: str, database_records: list) -> list:
 
         semantic_score = calculate_cosine_similarity(query_vector, code_vector)
 
+        # Добавляем бонусы за совпадение ключевых слов
         keyword_bonus = 0.0
         for word in query_words:
             if word in func_name:
-                # Если слово из запроса есть прямо в названии — весомый сигнал
                 keyword_bonus += 0.15
             elif word in docstring:
                 keyword_bonus += 0.08
             elif word in code_text:
                 keyword_bonus += 0.05
 
-        # Ограничиваем сверху, чтобы не выходить за [0, 1]
         final_score = min(semantic_score + keyword_bonus, 1.0)
 
         compiled_results.append({

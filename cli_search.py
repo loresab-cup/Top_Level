@@ -5,7 +5,6 @@ from search_engine import search_top_code_snippets
 
 
 def load_database():
-    """Загружает записи из ChromaDB в список словарей, как ожидает search_engine."""
     db_path = "./chroma_db"
     if not os.path.exists(db_path):
         print(f"Ошибка: база данных не найдена по пути {db_path}. Запустите сначала python index.py")
@@ -23,6 +22,7 @@ def load_database():
         print("База данных пуста. Проиндексируйте код с помощью index.py.")
         sys.exit(1)
 
+    # Собираем записи в удобный для поиска формат
     records = []
     for i in range(len(data['ids'])):
         record = data['metadatas'][i].copy()
@@ -35,7 +35,7 @@ def load_database():
 
 
 def print_results(results):
-    """Выводит результаты поиска в читаемом формате."""
+    # Выводим результаты в консоль красиво
     if not results:
         print("Совпадений не найдено.")
         return
@@ -47,7 +47,7 @@ def print_results(results):
         print(f"   Строки: {r['lines']}")
         if r.get('docstring'):
             print(f"   Описание: {r['docstring'][:150]}...")
-        # Показываем первые 5 строк кода, можно расширить
+        # Показываем первые 5 строк, чтобы не захламлять вывод
         code_lines = r['code'].split('\n')
         preview = '\n'.join(code_lines[:5])
         if len(code_lines) > 5:
@@ -59,7 +59,7 @@ def print_results(results):
 def main():
     db_records = load_database()
 
-    # Если передан аргумент командной строки – выполняем разовый поиск
+    # Если передали запрос как аргумент — сразу ищем
     if len(sys.argv) > 1:
         query = " ".join(sys.argv[1:])
         print(f"Запрос: {query}")
@@ -67,7 +67,7 @@ def main():
         print_results(results)
         return
 
-    # Интерактивный режим
+    # Интерактивный режим для удобства
     print("\n=== CodeLens Консольный поиск ===")
     print("Введите запрос на русском или английском. Для выхода введите /exit или /quit.\n")
 

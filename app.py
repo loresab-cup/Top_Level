@@ -12,12 +12,13 @@ from llm_assistant import generate_llm_answer
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# Все пути — относительно папки с app.py, не зависим от рабочей директории процесса
+# Чтобы не зависеть от того, из какой папки запустили
 PROJECT_DIR = Path(__file__).parent.resolve()
 CHROMA_PATH = PROJECT_DIR / "chroma_db"
 
 
 def ensure_ollama_is_running():
+    # Проверяем, запущен ли Ollama на стандартном порту
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(1)
     try:
@@ -31,7 +32,7 @@ def ensure_ollama_is_running():
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-                time.sleep(3)
+                time.sleep(3)  # Даём время запуститься
             except FileNotFoundError:
                 st.error("Ollama не найден. Установите его или отключите LLM-режим.")
 
@@ -44,12 +45,8 @@ st.caption("Система семантического поиска и анал
 
 
 def fetch_records_from_storage():
-    """
-    Загружает записи из ChromaDB.
-    Возвращает список записей или None если база не существует / пуста.
-    """
+    # Загружаем всё из ChromaDB, если она есть
     if not CHROMA_PATH.exists():
-        # Папки chroma_db ещё нет — индексация ещё не запускалась
         return None
     try:
         client = chromadb.PersistentClient(path=str(CHROMA_PATH))
@@ -75,10 +72,7 @@ def fetch_records_from_storage():
 
 
 def resolve_directory(raw_path: str) -> Path:
-    """
-    Принимает любой путь от пользователя и возвращает абсолютный.
-    Относительные пути отсчитываются от PROJECT_DIR.
-    """
+    # Превращаем любой путь в абсолютный
     p = Path(raw_path.strip()).expanduser()
     if not p.is_absolute():
         p = (PROJECT_DIR / p).resolve()
@@ -86,10 +80,6 @@ def resolve_directory(raw_path: str) -> Path:
 
 
 def reindex_codebase(raw_path: str) -> bool:
-    """
-    Запускает index.py для указанной директории.
-    index.py сам удалит старую коллекцию и создаст новую с нуля.
-    """
     target = resolve_directory(raw_path)
 
     if not target.is_dir():
@@ -106,7 +96,7 @@ def reindex_codebase(raw_path: str) -> bool:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                timeout=300,
+                timeout=300,  # 5 минут, обычно хватает
                 cwd=str(PROJECT_DIR),
             )
             if proc.returncode != 0:
@@ -126,7 +116,7 @@ def reindex_codebase(raw_path: str) -> bool:
 
 
 def evaluate_precision() -> str:
-    """Запускает generate_results.py и score.py, возвращает текст отчёта."""
+    # Прогоняем тестовые вопросы и считаем метрику
     if not (PROJECT_DIR / "eval_questions.json").exists():
         return "Файл eval_questions.json не найден в папке проекта."
 
@@ -160,9 +150,8 @@ def evaluate_precision() -> str:
     return score_proc.stdout
 
 
-# --- Инициализация состояния сессии ---
-# db намеренно не загружаем автоматически при старте —
-# пользователь должен явно нажать «Индексировать»
+# Инициализация состояния сессии
+# Не загружаем базу при старте, пусть пользователь сам нажмёт кнопку
 if "db" not in st.session_state:
     st.session_state.db = None
 if "results" not in st.session_state:
@@ -174,7 +163,7 @@ if "directory" not in st.session_state:
 if "precision_report" not in st.session_state:
     st.session_state.precision_report = None
 
-# --- Боковая панель ---
+# Боковая панель
 with st.sidebar:
     st.markdown("### Управление системой")
 
@@ -197,14 +186,13 @@ with st.sidebar:
         if not st.session_state.directory.strip():
             st.error("Введите путь к папке с кодом.")
         else:
-            # Сбрасываем базу до начала — пока идёт индексация, статус «не создана»
+            # Очищаем всё перед переиндексацией
             st.session_state.db = None
             st.session_state.results = None
             st.session_state.answer = None
             st.session_state.precision_report = None
 
             if reindex_codebase(st.session_state.directory):
-                # Загружаем свежую базу только после успешной индексации
                 st.session_state.db = fetch_records_from_storage()
                 st.rerun()
 
@@ -220,7 +208,7 @@ with st.sidebar:
 
     st.divider()
 
-    # Статус базы данных
+    # Показываем статус
     if not st.session_state.db:
         st.warning("Статус: база не создана\n\nВведите путь и нажмите «Индексировать».")
     else:
@@ -241,7 +229,7 @@ if st.session_state.precision_report:
             st.rerun()
     st.text(st.session_state.precision_report)
 
-# --- Поиск ---
+# Поиск
 user_query = st.text_input(
     "Введите технический вопрос или ключевые слова:",
     placeholder="Например: как в проекте создаётся токен доступа?",
@@ -262,7 +250,7 @@ if st.button("Выполнить поиск", type="primary") and user_query:
     if not st.session_state.results:
         st.warning("Ничего не найдено. Попробуйте другой запрос.")
 
-# --- Результаты ---
+# Результаты
 if st.session_state.results:
     st.divider()
     st.markdown("### Результаты поиска (Top-5)")

@@ -5,7 +5,7 @@ from search_engine import search_top_code_snippets
 
 
 def main():
-    # Все пути считаем относительно папки со скриптом, а не рабочей директории
+    # Чтобы работало из любой папки, все пути считаем относительно скрипта
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     questions_file = os.path.join(script_dir, "eval_questions.json")
@@ -27,6 +27,7 @@ def main():
 
     data = collection.get(include=["embeddings", "metadatas", "documents"])
 
+    # Превращаем данные из ChromaDB в удобный для поиска формат
     database_records = []
     for i in range(len(data["ids"])):
         record = data["metadatas"][i].copy()
@@ -43,10 +44,10 @@ def main():
 
         top_snippets = search_top_code_snippets(query_text, database_records)
 
+        # Формируем chunk_id по формату из ТЗ
         predicted_ids = []
         for snippet in top_snippets:
-            # file_path уже хранится как относительный (gymhero/security.py),
-            # поэтому никаких префиксов убирать не нужно
+            # Путь уже хранится без лишних префиксов, просто заменяем слеши
             file_path = snippet["file_path"].replace("\\", "/")
             start_line = snippet["lines"].split("-")[0]
             snippet_id = f"{file_path}:{snippet['name']}:{start_line}"

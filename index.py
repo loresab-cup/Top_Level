@@ -5,17 +5,12 @@ from search_engine import get_text_embedding
 
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
-# chroma_db всегда создаётся рядом с этим скриптом
+# База данных всегда рядом со скриптом
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CHROMA_PATH = os.path.join(SCRIPT_DIR, "chroma_db")
 
 
 def extract_code_with_metadata(file_path: str, base_directory: str) -> list:
-    """
-    Парсит Python-файл и извлекает функции и классы.
-    Методы класса получают имя ClassName.method_name —
-    именно такой формат ожидает eval_questions.json.
-    """
     with open(file_path, "r", encoding="utf-8") as f:
         source_code = f.read()
 
@@ -25,12 +20,12 @@ def extract_code_with_metadata(file_path: str, base_directory: str) -> list:
         print(f"[Пропуск] {file_path} — синтаксическая ошибка")
         return []
 
-    # Относительный путь от корня датасета — именно он идёт в chunk_id
+    # Относительный путь, чтобы в chunk_id был только путь внутри проекта
     rel_path = os.path.relpath(file_path, base_directory).replace("\\", "/")
 
     results = []
 
-    # Классы и их методы
+    # Сначала обрабатываем классы
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
@@ -51,7 +46,7 @@ def extract_code_with_metadata(file_path: str, base_directory: str) -> list:
                 "code": code_chunk,
             })
 
-        # Методы внутри класса — имя вида ClassName.method_name
+        # Методы внутри класса — с именем класса через точку, как в примерах
         for child in ast.walk(node):
             if not isinstance(child, ast.FunctionDef):
                 continue
@@ -70,7 +65,7 @@ def extract_code_with_metadata(file_path: str, base_directory: str) -> list:
                 "code": method_code,
             })
 
-    # Функции верхнего уровня (не внутри класса)
+    # Потом функции вне классов
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             try:
@@ -92,7 +87,7 @@ def extract_code_with_metadata(file_path: str, base_directory: str) -> list:
 
 
 def prepare_text_for_embedding(code_data: dict) -> str:
-    """Обогащаем текст перед векторизацией: имя + docstring + код."""
+    # Склеиваем всё в один текст, чтобы модель лучше понимала
     parts = [f'{code_data["type"]}: {code_data["name"]}']
     if code_data["docstring"]:
         parts.append(f'Description: {code_data["docstring"]}')
@@ -107,8 +102,7 @@ def index_codebase(directory: str):
 
     client = chromadb.PersistentClient(path=CHROMA_PATH)
 
-    # Удаляем старую коллекцию перед переиндексацией —
-    # иначе старые записи накапливаются и счётчик растёт бесконечно
+    # Удаляем старую коллекцию, чтобы не было дублей при переиндексации
     try:
         client.delete_collection("code_snippets")
         print("[OK] Старая коллекция удалена, создаём новую.")
@@ -152,7 +146,6 @@ def index_codebase(directory: str):
                 }
 
                 start_line = chunk["lines"].split("-")[0]
-                # Формат: "gymhero/security.py:create_access_token:12"
                 chunk_id = f"{chunk['file_path']}:{chunk['name']}:{start_line}"
 
                 documents.append(enriched_text)
