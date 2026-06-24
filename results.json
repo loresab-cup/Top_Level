@@ -6,7 +6,7 @@
             "gymhero/api/routes/auth.py:login_for_access_token:19",
             "gymhero/api/routes/user.py:create_user:95",
             "gymhero/api/dependencies.py:get_current_active_user:82",
-            "gymhero/crud/user.py:authenticate_user:67"
+            "gymhero/crud/user.py:UserCRUDRepository.authenticate_user:67"
         ]
     },
     {
@@ -16,13 +16,13 @@
             "gymhero/security.py:verify_password:38",
             "gymhero/api/routes/auth.py:login_for_access_token:19",
             "gymhero/schemas/auth.py:Token:6",
-            "gymhero/schemas/auth.py:TokenPayload:13"
+            "gymhero/api/dependencies.py:get_current_user:58"
         ]
     },
     {
         "question_id": "q_03",
         "top_5_chunks": [
-            "gymhero/crud/user.py:is_super_user:25",
+            "gymhero/crud/user.py:UserCRUDRepository.is_super_user:25",
             "gymhero/schemas/user.py:UserInDB:23",
             "gymhero/api/dependencies.py:get_current_superuser:105",
             "gymhero/api/routes/training_plan.py:get_training_plans_by_name_for_super_user:165",
@@ -33,16 +33,16 @@
         "question_id": "q_04",
         "top_5_chunks": [
             "gymhero/api/routes/user.py:create_user:95",
-            "gymhero/crud/user.py:get_user_by_email:11",
+            "gymhero/crud/user.py:UserCRUDRepository.get_user_by_email:11",
             "gymhero/api/routes/user.py:fetch_user_by_email:70",
-            "gymhero/api/routes/training_plan.py:create_training_plan:192",
-            "gymhero/crud/base.py:create_with_owner:162"
+            "gymhero/crud/base.py:CRUDRepository.create_with_owner:162",
+            "gymhero/api/routes/training_plan.py:create_training_plan:192"
         ]
     },
     {
         "question_id": "q_05",
         "top_5_chunks": [
-            "gymhero/crud/user.py:authenticate_user:67",
+            "gymhero/crud/user.py:UserCRUDRepository.authenticate_user:67",
             "gymhero/security.py:verify_password:38",
             "gymhero/api/routes/auth.py:login_for_access_token:19",
             "gymhero/api/dependencies.py:get_current_user:58",
@@ -52,8 +52,8 @@
     {
         "question_id": "q_06",
         "top_5_chunks": [
-            "gymhero/database/session.py:get_local_session:42",
             "gymhero/database/db.py:get_ctx_db:32",
+            "gymhero/database/session.py:get_local_session:42",
             "gymhero/database/db.py:get_db:11",
             "gymhero/api/routes/auth.py:login_for_access_token:19",
             "gymhero/api/routes/training_plan.py:get_all_training_plans_for_owner:59"
@@ -66,25 +66,25 @@
             "gymhero/database/db.py:get_ctx_db:32",
             "gymhero/database/session.py:get_engine:25",
             "gymhero/api/routes/level.py:fetch_all_levels:23",
-            "gymhero/api/routes/level.py:fetch_level_by_name:74"
+            "gymhero/crud/base.py:CRUDRepository.create:87"
         ]
     },
     {
         "question_id": "q_08",
         "top_5_chunks": [
             "gymhero/config.py:Settings:11",
+            "gymhero/api/routes/training_plan.py:get_training_units_in_training_plan:450",
             "gymhero/schemas/auth.py:TokenPayload:13",
             "gymhero/api/routes/training_plan.py:add_training_unit_to_training_plan:325",
-            "gymhero/config.py:ContainerDevSettings:37",
-            "gymhero/api/routes/training_plan.py:get_training_units_in_training_plan:450"
+            "gymhero/config.py:ContainerDevSettings:37"
         ]
     },
     {
         "question_id": "q_09",
         "top_5_chunks": [
-            "gymhero/crud/base.py:create_with_owner:162",
-            "gymhero/crud/base.py:create:87",
-            "gymhero/crud/base.py:get_many_for_owner:189",
+            "gymhero/crud/base.py:CRUDRepository.create_with_owner:162",
+            "gymhero/crud/base.py:CRUDRepository.get_many_for_owner:189",
+            "gymhero/crud/base.py:CRUDRepository.create:87",
             "gymhero/api/routes/training_plan.py:get_all_training_plans_for_owner:59",
             "gymhero/api/routes/auth.py:register:55"
         ]
@@ -96,7 +96,7 @@
             "gymhero/api/dependencies.py:get_token:35",
             "gymhero/api/routes/user.py:update_user:175",
             "gymhero/api/routes/auth.py:register:55",
-            "gymhero/api/routes/user.py:fetch_user_by_email:70"
+            "gymhero/api/routes/level.py:delete_level:132"
         ]
     },
     {
@@ -115,8 +115,8 @@
             "gymhero/api/routes/training_plan.py:add_training_unit_to_training_plan:325",
             "gymhero/api/routes/training_plan.py:remove_training_unit_from_training_plan:385",
             "gymhero/api/routes/training_plan.py:get_training_units_in_training_plan:450",
-            "gymhero/crud/training_plan.py:add_training_unit_to_training_plan:11",
-            "gymhero/crud/training_plan.py:remove_training_unit_from_training_plan:36"
+            "gymhero/crud/training_plan.py:TrainingPlanCRUD.add_training_unit_to_training_plan:11",
+            "gymhero/crud/training_plan.py:TrainingPlanCRUD.remove_training_unit_from_training_plan:36"
         ]
     },
     {
@@ -136,17 +136,17 @@
             "gymhero/api/routes/training_unit.py:delete_training_unit:267",
             "gymhero/api/routes/training_plan.py:remove_training_unit_from_training_plan:385",
             "gymhero/api/routes/exercise.py:delete_exercise:232",
-            "gymhero/api/routes/training_plan.py:get_all_training_plans_for_owner:59"
+            "gymhero/api/routes/level.py:delete_level:132"
         ]
     },
     {
         "question_id": "q_15",
         "top_5_chunks": [
+            "gymhero/crud/base.py:CRUDRepository.get_many:53",
             "gymhero/database/db.py:get_ctx_db:32",
             "gymhero/api/routes/training_plan.py:get_all_training_plans_for_owner:59",
-            "gymhero/crud/base.py:get_many:53",
             "gymhero/api/routes/level.py:fetch_all_levels:23",
-            "gymhero/crud/base.py:create:87"
+            "gymhero/crud/base.py:CRUDRepository.get_one:33"
         ]
     }
 ]

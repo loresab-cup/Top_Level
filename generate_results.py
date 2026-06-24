@@ -5,66 +5,64 @@ from search_engine import search_top_code_snippets
 
 
 def main():
-    # 1. Загружаем вопросы от организаторов
-    if not os.path.exists("eval_questions.json"):
-        print("Ошибка: Положите файл eval_questions.json в корень проекта!")
+    # Все пути считаем относительно папки со скриптом, а не рабочей директории
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    questions_file = os.path.join(script_dir, "eval_questions.json")
+    if not os.path.exists(questions_file):
+        print("Ошибка: положите файл eval_questions.json в папку проекта!")
         return
 
-    with open("eval_questions.json", "r", encoding="utf-8") as f:
+    with open(questions_file, "r", encoding="utf-8") as f:
         eval_data = json.load(f)
 
-    # 2. Подключаемся к нашей готовой базе данных
-    client = chromadb.PersistentClient(path="./chroma_db")
-    collection = client.get_collection("code_snippets")
+    chroma_path = os.path.join(script_dir, "chroma_db")
+    client = chromadb.PersistentClient(path=chroma_path)
+
+    try:
+        collection = client.get_collection("code_snippets")
+    except Exception:
+        print("Ошибка: коллекция code_snippets не найдена. Запустите индексацию.")
+        return
+
     data = collection.get(include=["embeddings", "metadatas", "documents"])
 
-    # Собираем записи базы данных в список словарей
     database_records = []
-    for i in range(len(data['ids'])):
-        record = data['metadatas'][i].copy()
-        record['embedding'] = data['embeddings'][i]
-        record['code'] = data['documents'][i]
+    for i in range(len(data["ids"])):
+        record = data["metadatas"][i].copy()
+        record["embedding"] = data["embeddings"][i]
+        record["code"] = data["documents"][i]
         database_records.append(record)
 
     output_results = []
 
-    # 3. Прогоняем каждый вопрос через поиск
-    print("Генерация результатов для eval_questions.json...")
+    print(f"Генерация результатов для {len(eval_data)} вопросов...")
     for item in eval_data:
         q_id = item["question_id"]
         query_text = item.get("query") or item.get("text") or item.get("question")
 
-        # Вызываем гибридный поиск (он вернет ТОП-5)
         top_snippets = search_top_code_snippets(query_text, database_records)
 
-        # Собираем ID найденных кусков кода
         predicted_ids = []
         for snippet in top_snippets:
-            # Приводим слеши и убираем префикс ./parsing_folder/, если он есть
-            file_path = snippet['file_path'].replace("\\", "/")
-            if file_path.startswith("./parsing_folder/"):
-                file_path = file_path[len("./parsing_folder/"):]
-            elif file_path.startswith("parsing_folder/"):
-                file_path = file_path[len("parsing_folder/"):]
-
-            # Берем первую строчку фрагмента кода
-            start_line = snippet['lines'].split('-')[0]
-
-            # Собираем итоговую строку по формату ТЗ
+            # file_path уже хранится как относительный (gymhero/security.py),
+            # поэтому никаких префиксов убирать не нужно
+            file_path = snippet["file_path"].replace("\\", "/")
+            start_line = snippet["lines"].split("-")[0]
             snippet_id = f"{file_path}:{snippet['name']}:{start_line}"
             predicted_ids.append(snippet_id)
 
-        # Добавляем результат для текущего вопроса
         output_results.append({
             "question_id": q_id,
-            "top_5_chunks": predicted_ids
+            "top_5_chunks": predicted_ids,
         })
 
-    # 4. Сохраняем итоговый файл результатов
-    with open("results.json", "w", encoding="utf-8") as f:
+    results_file = os.path.join(script_dir, "results.json")
+    with open(results_file, "w", encoding="utf-8") as f:
         json.dump(output_results, f, ensure_ascii=False, indent=4)
 
-    print("Успешно! Файл results.json создан. Теперь можно запускать python score.py")
+    print(f"Готово! {results_file} создан.")
+    print("Запускайте: python score.py --predictions results.json --questions eval_questions.json")
 
 
 if __name__ == "__main__":

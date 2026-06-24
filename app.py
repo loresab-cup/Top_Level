@@ -5,20 +5,23 @@ import socket
 import subprocess
 import time
 import sys
+from pathlib import Path
 from search_engine import search_top_code_snippets
 from llm_assistant import generate_llm_answer
 
-# Настройка переменных окружения
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# --- Автозапуск Ollama (без лишних сообщений) ---
+# Все пути — относительно папки с app.py, не зависим от рабочей директории процесса
+PROJECT_DIR = Path(__file__).parent.resolve()
+CHROMA_PATH = PROJECT_DIR / "chroma_db"
+
+
 def ensure_ollama_is_running():
-    ollama_port = 11434
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(1)
     try:
-        s.connect(("127.0.0.1", ollama_port))
+        s.connect(("127.0.0.1", 11434))
         s.close()
     except (socket.error, socket.timeout):
         with st.spinner("Запуск Ollama..."):
@@ -26,11 +29,12 @@ def ensure_ollama_is_running():
                 subprocess.Popen(
                     ["ollama", "serve"],
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    stderr=subprocess.DEVNULL,
                 )
                 time.sleep(3)
             except FileNotFoundError:
                 st.error("Ollama не найден. Установите его или отключите LLM-режим.")
+
 
 ensure_ollama_is_running()
 
@@ -38,150 +42,194 @@ st.set_page_config(page_title="CodeLens - Поиск по коду", layout="wid
 st.title("CodeLens")
 st.caption("Система семантического поиска и анализа исходного кода")
 
-# --- Работа с базой данных ---
+
 def fetch_records_from_storage():
-    """Загружает записи из ChromaDB, если коллекция существует."""
+    """
+    Загружает записи из ChromaDB.
+    Возвращает список записей или None если база не существует / пуста.
+    """
+    if not CHROMA_PATH.exists():
+        # Папки chroma_db ещё нет — индексация ещё не запускалась
+        return None
     try:
-        client = chromadb.PersistentClient(path="./chroma_db")
+        client = chromadb.PersistentClient(path=str(CHROMA_PATH))
         try:
             collection = client.get_collection("code_snippets")
         except Exception:
-            return None  # коллекция не создана
+            return None
 
         data = collection.get(include=["embeddings", "metadatas", "documents"])
-        if not data or not data['ids']:
+        if not data or not data["ids"]:
             return None
 
         records = []
-        for i in range(len(data['ids'])):
-            record = data['metadatas'][i].copy()
-            record['embedding'] = data['embeddings'][i]
-            record['code'] = data['documents'][i]
+        for i in range(len(data["ids"])):
+            record = data["metadatas"][i].copy()
+            record["embedding"] = data["embeddings"][i]
+            record["code"] = data["documents"][i]
             records.append(record)
-        return records
+        return records if records else None
     except Exception as e:
         st.error(f"Ошибка чтения БД: {e}")
         return None
 
-def reindex_codebase(directory: str):
-    """Запускает индексацию и возвращает True при успехе."""
-    if not os.path.isdir(directory):
-        st.error(f"Директория '{directory}' не существует.")
+
+def resolve_directory(raw_path: str) -> Path:
+    """
+    Принимает любой путь от пользователя и возвращает абсолютный.
+    Относительные пути отсчитываются от PROJECT_DIR.
+    """
+    p = Path(raw_path.strip()).expanduser()
+    if not p.is_absolute():
+        p = (PROJECT_DIR / p).resolve()
+    return p.resolve()
+
+
+def reindex_codebase(raw_path: str) -> bool:
+    """
+    Запускает index.py для указанной директории.
+    index.py сам удалит старую коллекцию и создаст новую с нуля.
+    """
+    target = resolve_directory(raw_path)
+
+    if not target.is_dir():
+        st.error(
+            f"Директория не найдена: `{target}`\n\n"
+            "Проверьте путь и попробуйте снова."
+        )
         return False
 
-    with st.spinner(f"Индексация {directory} ..."):
+    with st.spinner(f"Индексация: {target} ..."):
         try:
             proc = subprocess.run(
-                [sys.executable, "index.py", directory],
+                [sys.executable, str(PROJECT_DIR / "index.py"), str(target)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                timeout=300
+                timeout=300,
+                cwd=str(PROJECT_DIR),
             )
             if proc.returncode != 0:
-                st.error(f"Ошибка индексации:\n{proc.stderr}")
+                st.error(f"Ошибка индексации:\n```\n{proc.stderr}\n```")
                 return False
-            st.success("Индексация завершена.")
+
+            st.success("Индексация завершена!")
+            if proc.stdout:
+                st.text(proc.stdout[-3000:])
             return True
         except subprocess.TimeoutExpired:
-            st.error("Индексация заняла слишком много времени.")
+            st.error("Индексация заняла больше 5 минут. Попробуйте меньшую папку.")
             return False
         except Exception as e:
             st.error(f"Не удалось запустить index.py: {e}")
             return False
 
-def evaluate_precision():
-    """Запускает generate_results.py и score.py, возвращает текст отчёта."""
-    if not os.path.exists("eval_questions.json"):
-        return "Файл eval_questions.json не найден."
 
-    # Генерация results.json
-    with st.spinner("Генерация результатов..."):
+def evaluate_precision() -> str:
+    """Запускает generate_results.py и score.py, возвращает текст отчёта."""
+    if not (PROJECT_DIR / "eval_questions.json").exists():
+        return "Файл eval_questions.json не найден в папке проекта."
+
+    with st.spinner("Генерация results.json..."):
         gen = subprocess.run(
-            [sys.executable, "generate_results.py"],
+            [sys.executable, str(PROJECT_DIR / "generate_results.py")],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            cwd=str(PROJECT_DIR),
         )
         if gen.returncode != 0:
-            return f"Ошибка generate_results: {gen.stderr}"
+            return f"Ошибка generate_results.py:\n{gen.stderr}"
 
-    # Вычисление Precision@5
     with st.spinner("Расчёт Precision@5..."):
-        score = subprocess.run(
-            [sys.executable, "score.py", "--predictions", "results.json", "--questions", "eval_questions.json"],
+        score_proc = subprocess.run(
+            [
+                sys.executable,
+                str(PROJECT_DIR / "score.py"),
+                "--predictions", str(PROJECT_DIR / "results.json"),
+                "--questions", str(PROJECT_DIR / "eval_questions.json"),
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            cwd=str(PROJECT_DIR),
         )
-        if score.returncode != 0:
-            return f"Ошибка score.py: {score.stderr}"
+        if score_proc.returncode != 0:
+            return f"Ошибка score.py:\n{score_proc.stderr}"
 
-    return score.stdout
+    return score_proc.stdout
 
-# --- Инициализация состояния ---
-if 'db' not in st.session_state:
-    st.session_state.db = fetch_records_from_storage()
-if 'results' not in st.session_state:
+
+# --- Инициализация состояния сессии ---
+# db намеренно не загружаем автоматически при старте —
+# пользователь должен явно нажать «Индексировать»
+if "db" not in st.session_state:
+    st.session_state.db = None
+if "results" not in st.session_state:
     st.session_state.results = None
-if 'answer' not in st.session_state:
+if "answer" not in st.session_state:
     st.session_state.answer = None
-# ИЗМЕНЕНИЕ: директория по умолчанию теперь ./parsing_folder
-if 'directory' not in st.session_state:
-    st.session_state.directory = "./parsing_folder"
-if 'precision_report' not in st.session_state:
+if "directory" not in st.session_state:
+    st.session_state.directory = ""
+if "precision_report" not in st.session_state:
     st.session_state.precision_report = None
 
 # --- Боковая панель ---
 with st.sidebar:
     st.markdown("### Управление системой")
 
-    # Выбор директории
     new_dir = st.text_input(
         "Путь к папке с .py файлами",
         value=st.session_state.directory,
-        help="Относительный или абсолютный путь. Пример: ./gymhero"
+        placeholder="Например: C:\\projects\\gymhero или ./gymhero",
+        help=(
+            "Абсолютный или относительный путь к папке с исходным кодом.\n"
+            "Примеры:\n"
+            "• C:\\1All\\UNIK\\dataset_case\\gymhero\n"
+            "• /home/user/projects/gymhero\n"
+            "• ./gymhero"
+        ),
     )
     if new_dir != st.session_state.directory:
         st.session_state.directory = new_dir
 
-    # Кнопка индексации
     if st.button("Индексировать / Переиндексировать", use_container_width=True):
-        if reindex_codebase(st.session_state.directory):
-            st.session_state.db = fetch_records_from_storage()
+        if not st.session_state.directory.strip():
+            st.error("Введите путь к папке с кодом.")
+        else:
+            # Сбрасываем базу до начала — пока идёт индексация, статус «не создана»
+            st.session_state.db = None
             st.session_state.results = None
             st.session_state.answer = None
             st.session_state.precision_report = None
+
+            if reindex_codebase(st.session_state.directory):
+                # Загружаем свежую базу только после успешной индексации
+                st.session_state.db = fetch_records_from_storage()
+                st.rerun()
+
+    st.divider()
+
+    if st.button("Оценить Precision@5", use_container_width=True):
+        if not st.session_state.db:
+            st.error("Сначала выполните индексацию.")
+        else:
+            report = evaluate_precision()
+            st.session_state.precision_report = report
             st.rerun()
 
     st.divider()
 
-    # Кнопка оценки точности
-    if st.button("Оценить Precision@5", use_container_width=True):
-        report = evaluate_precision()
-        st.session_state.precision_report = report
-        st.rerun()
-
-    st.divider()
-
-    # Статус БД
-    db_status = "Не подключено"
-    if st.session_state.db is None:
-        db_status = "База не создана"
-    elif isinstance(st.session_state.db, list) and len(st.session_state.db) == 0:
-        db_status = "База пуста"
-    elif st.session_state.db:
-        db_status = f"Подключено ({len(st.session_state.db)} фрагментов)"
-
-    if "не создана" in db_status or "пуста" in db_status:
-        st.warning(f"Статус: {db_status}\n\nНажмите «Индексировать» для создания.")
+    # Статус базы данных
+    if not st.session_state.db:
+        st.warning("Статус: база не создана\n\nВведите путь и нажмите «Индексировать».")
     else:
-        st.info(f"Статус: {db_status}")
+        st.info(f"Статус: подключено ({len(st.session_state.db)} фрагментов)")
 
     st.divider()
     use_llm = st.checkbox("Включить генерацию ответа ИИ", value=True)
 
-# --- Отображение отчёта о точности (с кнопкой закрытия) ---
+# --- Отчёт Precision@5 ---
 if st.session_state.precision_report:
     st.divider()
     col1, col2 = st.columns([4, 1])
@@ -193,18 +241,17 @@ if st.session_state.precision_report:
             st.rerun()
     st.text(st.session_state.precision_report)
 
-# --- Поисковый интерфейс ---
+# --- Поиск ---
 user_query = st.text_input(
     "Введите технический вопрос или ключевые слова:",
-    placeholder="Например: как в проекте создаётся токен доступа?"
+    placeholder="Например: как в проекте создаётся токен доступа?",
 )
 
 if st.button("Выполнить поиск", type="primary") and user_query:
-    if st.session_state.db is None or len(st.session_state.db) == 0:
+    if not st.session_state.db:
         st.error("База данных не готова. Сначала выполните индексацию.")
         st.stop()
 
-    # Очищаем предыдущий отчёт о метрике при новом поиске
     st.session_state.precision_report = None
     st.session_state.results = None
     st.session_state.answer = None
@@ -215,22 +262,26 @@ if st.button("Выполнить поиск", type="primary") and user_query:
     if not st.session_state.results:
         st.warning("Ничего не найдено. Попробуйте другой запрос.")
 
-# --- Вывод результатов поиска ---
+# --- Результаты ---
 if st.session_state.results:
     st.divider()
     st.markdown("### Результаты поиска (Top-5)")
 
     for i, res in enumerate(st.session_state.results):
-        header = f"[{i+1}] {res['name']} | {res['file_path']} (Релевантность: {res['score']}%)"
+        header = (
+            f"[{i+1}] {res['name']} | {res['file_path']} "
+            f"(Релевантность: {res['score']}%)"
+        )
         with st.expander(header):
-            st.code(res['code'], language="python")
-            if res.get('docstring'):
+            st.code(res["code"], language="python")
+            if res.get("docstring"):
                 st.markdown(f"**Документация:** {res['docstring']}")
 
-    # Генерация LLM-ответа (если включено)
     if use_llm and st.session_state.answer is None:
         with st.spinner("Генерация ответа ИИ..."):
-            st.session_state.answer = generate_llm_answer(user_query, st.session_state.results)
+            st.session_state.answer = generate_llm_answer(
+                user_query, st.session_state.results
+            )
             st.rerun()
 
     if st.session_state.answer:
